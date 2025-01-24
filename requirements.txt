@@ -1,7 +1,7 @@
 flask==3.0.3
 scikit-learn==1.6.1
 sentence_transformers==3.3.1
-azure.blob.storage==12.23.1
+azure.blob.storage==12.24.0
 openai==0.28.0
 
 
