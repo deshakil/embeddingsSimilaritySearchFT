@@ -1,5 +1,4 @@
 flask==3.0.3
-numpy==2.1.2
 scikit-learn==1.6.1
 sentence_transformers==3.3.1
 azure.blob.storage==12.23.1
