@@ -6,7 +6,7 @@ import json
 import numpy as np
 from azure.storage.blob import BlobServiceClient
 from sklearn.metrics.pairwise import cosine_similarity
-import openai
+from openai import AzureOpenAI
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -79,71 +79,84 @@ def search():
         return jsonify({"error": str(e)}), 500
 
 def perform_ner(query):
+    # Azure OpenAI settings
+    endpoint = "https://weez-openai-resource.openai.azure.com/"
+    api_key = os.getenv('OPENAI_API_KEY')
+    api_version = "2024-12-01-preview"
+    deployment = "gpt-4"  # Using GPT-4 as in the original code
+    
+    # Create client with API key
+    client = AzureOpenAI(
+        api_key=api_key,
+        api_version=api_version,
+        azure_endpoint=endpoint
+    )
+    
     messages = [
         {
             "role": "system",
-            "content": """You are a Named Entity Recognition (NER) expert. Your task is to analyze a given text and identify specific 
-               entities based on the following tags:
-
-               - **B-DOC / I-DOC**: Represents document types like PDF, DOCX, XLSX, PPTX, and their variants. It also includes generic document mentions such as "report", "presentation", or "excel sheet".
-               - **B-PER / I-PER**: Represents names of people such as "John Watson", "Elon Musk", or "Mary".
-               - **B-TOP / I-TOP**: Represents topics or subjects such as "natural disaster", "machine learning", or "climate change".
-               - **B-DATE / I-DATE**: Represents relative or absolute dates, such as "two months ago", "on April 24th", "one year ago", "24/10/24", or "yesterday".
-
-               Each word in the input should be tagged as:
-               - `B-TAG`: Beginning of an entity.
-               - `I-TAG`: Continuation of an entity.
-               - `O`: Not part of any entity.
-
-               ### Additional Guidelines:
-               1. The query can be formal or informal.
-                  - Example (Formal): "Please provide me with the PDF about natural disasters."
-                  - Example (Informal): "Give me a pdf on natural disasters sent by John."
-                  - Example (Vague): "Show me the document which contains data on natural disasters."
-                  - Example (Direct Data): "Different kinds of natural disasters."
-               2. Even if the query directly mentions file content or metadata (like topics, dates, or names), identify and tag all relevant entities.
-
-               ### Example:
-
-               **Input**:  
-               "Give me a pdf sent by John on the topic of natural disaster two months ago."
-
-               **Output**:  
-               ```plaintext
-               Give  O
-               me    O
-               a     O
-               pdf   B-DOC
-               sent  O
-               by    O
-               John  B-PER
-               on    O
-               the   O
-               topic O
-               of    O
-               natural B-TOP
-               disaster I-TOP
-               two   B-DATE
-               months I-DATE
-               ago    I-DATE
-               ```"""
+            "content": """You are a Named Entity Recognition (NER) expert. Your task is to analyze a given text and identify specific \
+                entities based on the following tags:
+                - **B-DOC / I-DOC**: Represents document types like PDF, DOCX, XLSX, PPTX, and their variants. It also includes generic document mentions such as "report", "presentation", or "excel sheet".
+                - **B-PER / I-PER**: Represents names of people such as "John Watson", "Elon Musk", or "Mary".
+                - **B-TOP / I-TOP**: Represents topics or subjects such as "natural disaster", "machine learning", or "climate change".
+                - **B-DATE / I-DATE**: Represents relative or absolute dates, such as "two months ago", "on April 24th", "one year ago", "24/10/24", or "yesterday".
+                Each word in the input should be tagged as:
+                - `B-TAG`: Beginning of an entity.
+                - `I-TAG`: Continuation of an entity.
+                - `O`: Not part of any entity.
+                ### Additional Guidelines:
+                1. The query can be formal or informal.
+                   - Example (Formal): "Please provide me with the PDF about natural disasters."
+                   - Example (Informal): "Give me a pdf on natural disasters sent by John."
+                   - Example (Vague): "Show me the document which contains data on natural disasters."
+                   - Example (Direct Data): "Different kinds of natural disasters."
+                2. Even if the query directly mentions file content or metadata (like topics, dates, or names), identify and tag all relevant entities.
+                ### Example:
+                **Input**:
+                  "Give me a pdf sent by John on the topic of natural disaster two months ago."
+                **Output**:
+                  ```plaintext
+                Give  O
+                me    O
+                a     O
+                pdf   B-DOC
+                sent  O
+                by    O
+                John  B-PER
+                on    O
+                the   O
+                topic O
+                of    O
+                natural B-TOP
+                disaster I-TOP
+                two   B-DATE
+                months I-DATE
+                ago    I-DATE
+                ```"""
         },
         {
             "role": "user",
             "content": query
         }
     ]
-
-    # Call OpenAI API for NER
-    response = openai.ChatCompletion.create(
-        model="gpt-4",
+    
+    # Call Azure OpenAI API for NER using new client syntax
+    response = client.chat.completions.create(
+        model=deployment,
         messages=messages,
         temperature=0,
         max_tokens=100
     )
-
-    # Return the response content
-    return response['choices'][0]['message']['content'].strip().split("\n")
+    
+    # Extract and return the response content
+    result = response.choices[0].message.content.strip()
+    
+    # Close the client
+    client.close()
+    
+    # Return the response content split by newlines
+    return result.split("\n")
 
 if __name__ == '__main__':
     app.run(debug=True)
