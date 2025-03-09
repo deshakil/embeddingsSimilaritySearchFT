@@ -18,7 +18,6 @@ blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CON
 EMBEDDINGS_CONTAINER = "weez-files-embeddings"
 
 # Set up OpenAI API Key
-openai.api_key = os.getenv("OPENAI_API_KEY")
 
 @app.route('/search', methods=['POST'])
 def search():
