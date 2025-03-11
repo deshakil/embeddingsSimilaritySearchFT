@@ -82,7 +82,7 @@ def perform_ner(query):
     endpoint = "https://weez-openai-resource.openai.azure.com/"
     api_key = os.getenv('OPENAI_API_KEY')
     api_version = "2024-12-01-preview"
-    deployment = "gpt-4"  # Using GPT-4 as in the original code
+    deployment = "gpt-4o"  # Using GPT-4 as in the original code
     
     # Create client with API key
     client = AzureOpenAI(
