@@ -172,7 +172,7 @@ def perform_ner(query):
     result = response.choices[0].message.content.strip()
     
     # Close the client
-    client.close()
+
     
     # Return the response content split by newlines
     return result.split("\n")
