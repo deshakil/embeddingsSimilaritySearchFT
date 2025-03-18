@@ -6,6 +6,7 @@ from azure.storage.blob import BlobServiceClient
 from sklearn.metrics.pairwise import cosine_similarity
 from openai import AzureOpenAI
 import threading
+import re
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -35,7 +36,17 @@ def search():
             return jsonify({"error": "Query and user_id are required."}), 400
 
         # Step 2: Perform NER on the query
-        entities = perform_ner(query)
+        ner_results = perform_ner(query)
+        
+        # Step 3: Extract entities from NER results
+        entities = extract_entities_from_ner(ner_results)
+        
+        # Log entities for debugging
+        print(f"Extracted entities: {entities}")
+        
+        if not entities:
+            # Fallback: use the whole query if no entities found
+            entities = [query]
 
         # Step 3: Generate embeddings for the extracted entities using Azure OpenAI client
         query_text = " ".join(entities)
@@ -72,10 +83,23 @@ def search():
         user_prefix = f"{user_id}/"
         
         # Safety check - ensure user_id doesn't contain path traversal characters
-        if '../' in user_id or '/' in user_id:
+        if '../' in user_id or '/' in user_id.replace('@', '').replace('.', ''):
             return jsonify({"error": "Invalid user_id format."}), 400
             
         # List only blobs that belong to this specific user
+        blobs = embeddings_container_client.list_blobs(name_starts_with=user_prefix)
+        
+        # Debug: List all blob names
+        blob_names = []
+        for blob in blobs:
+            blob_names.append(blob.name)
+        print(f"Found blobs for user {user_id}: {blob_names}")
+        
+        # If no blobs found, return early
+        if not blob_names:
+            return jsonify({"message": "No files found for this user."}), 404
+        
+        # Reset blob iterator
         blobs = embeddings_container_client.list_blobs(name_starts_with=user_prefix)
 
         for blob in blobs:
@@ -97,14 +121,35 @@ def search():
                 file_name = embedding_data.get("file_name")
                 file_path = embedding_data.get("file_path")
                 
+                # Debug output
+                print(f"Processing file: {file_name}, path: {file_path}")
+                
                 # Verify the file_path also belongs to this user
                 if not file_path.startswith(user_prefix):
                     continue
                     
-                file_embeddings = np.array(embedding_data.get("embeddings"))
+                # Extract embeddings - handle different possible formats
+                file_embeddings = embedding_data.get("embeddings")
+                
+                # Debug output for embeddings format
+                print(f"Embeddings type: {type(file_embeddings)}")
+                
+                # Handle case where embeddings might be nested or in different format
+                if isinstance(file_embeddings, list) and isinstance(file_embeddings[0], list):
+                    # If it's a list of lists (chunks), concatenate or use the first chunk
+                    file_embeddings = np.array(file_embeddings[0])
+                elif isinstance(file_embeddings, list):
+                    file_embeddings = np.array(file_embeddings)
+                else:
+                    # Skip if embeddings are not in expected format
+                    print(f"Unexpected embeddings format for {file_name}")
+                    continue
 
                 # Step 5: Compute cosine similarity
                 similarity = cosine_similarity(query_embedding, file_embeddings.reshape(1, -1))[0][0]
+                
+                # Debug output
+                print(f"Similarity score for {file_name}: {similarity}")
 
                 # Add to thread-local matches list
                 thread_local.matches.append({
@@ -145,6 +190,51 @@ def search():
             del thread_local.matches
         if hasattr(thread_local, 'processed_files'):
             del thread_local.processed_files
+
+def extract_entities_from_ner(ner_results):
+    """Extract meaningful entities from NER tagged results"""
+    entities = []
+    current_entity = []
+    current_tag = None
+    
+    for line in ner_results:
+        # Skip empty lines
+        if not line.strip():
+            continue
+            
+        parts = line.strip().split()
+        if len(parts) >= 2:
+            word = parts[0]
+            tag = parts[-1]  # Last part is the tag
+            
+            # Check if this is an entity
+            if tag != 'O':
+                # New entity type
+                if tag.startswith('B-') or (current_tag and current_tag != tag):
+                    # Save previous entity if exists
+                    if current_entity:
+                        entities.append(' '.join(current_entity))
+                        current_entity = []
+                    
+                    # Start new entity
+                    current_entity.append(word)
+                    current_tag = tag
+                # Continuation of current entity
+                elif tag.startswith('I-'):
+                    current_entity.append(word)
+                    current_tag = tag
+            else:
+                # End of an entity
+                if current_entity:
+                    entities.append(' '.join(current_entity))
+                    current_entity = []
+                    current_tag = None
+    
+    # Add the last entity if exists
+    if current_entity:
+        entities.append(' '.join(current_entity))
+    
+    return entities
 
 def perform_ner(query):
     # Azure OpenAI settings
@@ -214,12 +304,17 @@ def perform_ner(query):
         model=deployment,
         messages=messages,
         temperature=0,
-        max_tokens=100
+        max_tokens=500  # Increased max tokens to handle longer queries
     )
     
     # Extract and return the response content
     result = response.choices[0].message.content.strip()
     
+    # Check if result contains actual NER output (looking for at least some tagged words)
+    if not re.search(r'\b[BI]-[A-Z]+\b', result):
+        print(f"NER result might not be in expected format: {result}")
+        # Try to parse it anyway or return empty
+        
     # Return the response content split by newlines
     return result.split("\n")
 
